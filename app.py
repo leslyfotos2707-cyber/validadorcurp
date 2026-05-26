@@ -42,3 +42,4 @@ if st.button("VALIDAR"):
     df = pd.DataFrame(resultados)
 
     st.dataframe(df)
+    
