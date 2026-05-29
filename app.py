@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="Validador CURP", layout="wide")
+st.set_page_config(page_title="Validador de CURP", layout="wide")
 
 ENTIDADES = {
     "AS": "Aguascalientes", "BC": "Baja California", "BS": "Baja California Sur",
@@ -23,37 +23,31 @@ def validar_curp(curp):
     patron = r'^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9]$'
     return bool(re.match(patron, curp))
 
-def obtener_genero(curp):
+def obtener_sexo(curp):
     curp = str(curp).strip().upper()
     if len(curp) >= 11:
-        return "Femenino" if curp[10] == "M" else "Masculino" if curp[10] == "H" else ""
+        if curp[10] == "M":
+            return "Femenino"
+        elif curp[10] == "H":
+            return "Masculino"
     return ""
 
 def obtener_estado(curp):
     curp = str(curp).strip().upper()
     if len(curp) >= 13:
-        clave = curp[11:13]
-        return ENTIDADES.get(clave, "")
+        return ENTIDADES.get(curp[11:13], "")
     return ""
 
-def procesar_lista(df):
-    resultados = []
+def obtener_fecha(curp):
+    curp = str(curp).strip().upper()
+    if len(curp) >= 10:
+        año = curp[4:6]
+        mes = curp[6:8]
+        dia = curp[8:10]
 
-    for _, fila in df.iterrows():
-        curp = str(fila.get("CURP", "")).strip().upper()
-        nombre = fila.get("Nombre Completo", "")
-        localidad = fila.get("Municipio, Estado", "")
-
-        if curp:
-            resultados.append({
-                "Nombre Completo": nombre,
-                "CURP": curp,
-                "Municipio, Estado": localidad if localidad else obtener_estado(curp),
-                "Sexo": fila.get("Sexo", "") if fila.get("Sexo", "") else obtener_genero(curp),
-                "Estatus CURP": "VÁLIDA" if validar_curp(curp) else "INCORRECTA"
-            })
-
-    return pd.DataFrame(resultados)
+        año_completo = "19" + año if int(año) > 30 else "20" + año
+        return f"{dia}/{mes}/{año_completo}"
+    return ""
 
 def convertir_excel(df):
     output = BytesIO()
@@ -61,60 +55,53 @@ def convertir_excel(df):
         df.to_excel(writer, index=False, sheet_name="Resultados")
     return output.getvalue()
 
-st.title("Validador de CURP")
-st.write("Carga un Excel o pega tus CURPs para validar la información.")
+st.title("Validador de CURP con Nombre y Localidad")
 
-opcion = st.radio(
-    "Selecciona una opción:",
-    ["Pegar CURPs", "Subir Excel"]
-)
+st.write("Sube un Excel con las columnas: Nombre Completo, CURP y Localidad.")
 
-if opcion == "Pegar CURPs":
-    texto = st.text_area("Pega una CURP por línea", height=250)
+archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
 
-    if st.button("Validar CURPs"):
-        lista = texto.splitlines()
+if archivo:
+    df = pd.read_excel(archivo)
 
-        df = pd.DataFrame({
-            "Nombre Completo": ["" for _ in lista],
-            "CURP": lista,
-            "Municipio, Estado": ["" for _ in lista],
-            "Sexo": ["" for _ in lista]
-        })
+    columnas_requeridas = ["Nombre Completo", "CURP", "Localidad"]
 
-        resultado = procesar_lista(df)
+    faltantes = [col for col in columnas_requeridas if col not in df.columns]
 
+    if faltantes:
+        st.error(f"Faltan estas columnas en tu Excel: {', '.join(faltantes)}")
+    else:
+        resultados = []
+
+        for _, fila in df.iterrows():
+            curp = str(fila["CURP"]).strip().upper()
+
+            resultados.append({
+                "Nombre Completo": fila["Nombre Completo"],
+                "CURP": curp,
+                "Localidad": fila["Localidad"],
+                "Sexo": obtener_sexo(curp),
+                "Fecha de Nacimiento": obtener_fecha(curp),
+                "Estado de Nacimiento": obtener_estado(curp),
+                "Estatus CURP": "VÁLIDA" if validar_curp(curp) else "INCORRECTA"
+            })
+
+        resultado = pd.DataFrame(resultados)
+
+        st.subheader("Resultados")
         st.dataframe(resultado, use_container_width=True)
+
+        validos = resultado[resultado["Estatus CURP"] == "VÁLIDA"]
+        incorrectos = resultado[resultado["Estatus CURP"] == "INCORRECTA"]
+
+        st.success(f"CURPs válidas: {len(validos)}")
+        st.error(f"CURPs incorrectas: {len(incorrectos)}")
 
         archivo_excel = convertir_excel(resultado)
 
         st.download_button(
-            label="Descargar Excel",
+            label="Descargar resultados en Excel",
             data=archivo_excel,
             file_name="resultado_curps.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-if opcion == "Subir Excel":
-    archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
-
-    st.info("Tu Excel debe tener una columna llamada CURP. Opcionalmente puede tener: Nombre Completo, Municipio, Estado y Sexo.")
-
-    if archivo:
-        df = pd.read_excel(archivo)
-
-        if "CURP" not in df.columns:
-            st.error("El archivo debe tener una columna llamada CURP.")
-        else:
-            resultado = procesar_lista(df)
-
-            st.dataframe(resultado, use_container_width=True)
-
-            archivo_excel = convertir_excel(resultado)
-
-            st.download_button(
-                label="Descargar Excel",
-                data=archivo_excel,
-                file_name="resultado_curps.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
